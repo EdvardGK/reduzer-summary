@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Read(//mnt/host/c/Users/edkjo/theSpruceForgeDevelopment/projects/active/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
