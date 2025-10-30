@@ -143,10 +143,12 @@ def show_mapping_panel(df):
             st.rerun()
 
     with col2:
-        if st.button("Ekskluder oppsummeringer", use_container_width=True):
+        if st.button("Ekskluder sum-rader", use_container_width=True,
+                     help="Ekskluder rader som 'Total', 'Sum', 'S8 - RAMBOELL' for å unngå dobbelttelling"):
             df.loc[df['is_summary'], 'excluded'] = True
             st.session_state['df'] = df
-            st.success("Oppsummeringer ekskludert!")
+            summary_count = df['is_summary'].sum()
+            st.success(f"{summary_count} sum-rader ekskludert!")
             st.rerun()
 
     with col3:
@@ -161,9 +163,10 @@ def show_mapping_panel(df):
     ]
 
     excluded_count = df['excluded'].sum()
+    summary_count = df['is_summary'].sum()
     unmapped_count = len(unmapped)
 
-    st.caption(f"{len(df)} rader totalt | {unmapped_count} ukartlagt | {excluded_count} ekskludert")
+    st.caption(f"{len(df)} rader totalt | {unmapped_count} ukartlagt | {excluded_count} ekskludert (inkl. {summary_count} sum-rader)")
 
     # Show unmapped first, then mapped, then excluded
     if len(unmapped) > 0:
