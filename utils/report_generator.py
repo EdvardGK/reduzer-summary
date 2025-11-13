@@ -6,9 +6,13 @@ PDF is master, Excel is support with matching structure
 """
 
 import io
+import logging
 import pandas as pd
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 # PDF imports
 from reportlab.lib.pagesizes import A4
@@ -22,9 +26,8 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
 from reportlab.pdfgen import canvas
 import plotly.graph_objects as go
 
-# Excel charting
-from openpyxl.chart import BarChart, PieChart, Reference
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+# Excel formatting (no charts)
+from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 
@@ -190,165 +193,129 @@ def generate_insights(df: pd.DataFrame, structure: Dict[str, Any],
 
 
 # ==============================================================================
-# EXCEL EXPORT WITH CHARTS
+# EXCEL EXPORT - PURE DATA (NO CHARTS)
 # ==============================================================================
 
 def generate_excel_report(df: pd.DataFrame, structure: Dict[str, Any],
                          scenario_summary: pd.DataFrame) -> io.BytesIO:
     """
-    Generate comprehensive Excel report matching PDF structure.
-    """
-    excel_output = io.BytesIO()
+    Generate pure data Excel export - supplementary documentation.
+    NO CHARTS - only clean, well-formatted data tables.
 
-    # Generate insights
-    insights = generate_insights(df, structure, scenario_summary)
+    Sheets:
+    1. Metadata - Report info and summary statistics
+    2. Scenario Summary - Aggregated by scenario
+    3. Discipline Breakdown - All scenario x discipline combinations
+    4. MMI Distribution - MMI categories per scenario
+    5. C vs A Comparison - Detailed comparison if applicable
+    6. Complete Dataset - All mapped rows with weighting
+    """
+    logger.info("Generating Excel data export...")
+    excel_output = io.BytesIO()
 
     with pd.ExcelWriter(excel_output, engine='openpyxl') as writer:
         workbook = writer.book
 
         # ==============================================================================
-        # SHEET 1: EXECUTIVE SUMMARY
+        # SHEET 1: METADATA & SUMMARY STATISTICS
         # ==============================================================================
-        ws_summary = workbook.create_sheet("📊 Sammendrag", 0)
+        ws_meta = workbook.create_sheet("📋 Metadata", 0)
 
         # Title
-        ws_summary['A1'] = 'LCA SCENARIO MAPPING - RAPPORT'
-        ws_summary['A1'].font = Font(size=18, bold=True, color='1565C0')
-        ws_summary.merge_cells('A1:D1')
-        ws_summary['A1'].alignment = Alignment(horizontal='center')
+        ws_meta['A1'] = 'LCA SCENARIO MAPPING - DATA EXPORT'
+        ws_meta['A1'].font = Font(size=16, bold=True, color='1565C0')
+        ws_meta.merge_cells('A1:B1')
 
-        ws_summary['A2'] = f"Generert: {datetime.now().strftime('%d.%m.%Y kl. %H:%M')}"
-        ws_summary['A2'].alignment = Alignment(horizontal='center')
-        ws_summary.merge_cells('A2:D2')
+        ws_meta['A2'] = f"Generert: {datetime.now().strftime('%d.%m.%Y kl. %H:%M')}"
+        ws_meta['A2'].font = Font(size=10, italic=True)
+        ws_meta.merge_cells('A2:B2')
 
+        # Summary stats
         row = 4
-
-        # Key metrics
-        ws_summary[f'A{row}'] = 'NØKKELTALL'
-        ws_summary[f'A{row}'].font = Font(size=14, bold=True, color='1565C0')
+        ws_meta[f'A{row}'] = 'OPPSUMMERING'
+        ws_meta[f'A{row}'].font = Font(size=12, bold=True, color='1565C0')
         row += 1
 
-        metrics_data = [
-            ['Total rader', str(len(df))],
-            ['Kartlagte rader', str(len(df[~df['excluded'] & df['mapped_scenario'].notna()]))],
-            ['Ekskluderte rader', str(int(df['excluded'].sum()))],
-            ['Antall scenarioer', str(len(structure))]
+        # Weighting stats
+        weighted_rows = len(df[(~df['excluded']) & (df['weighting'] < 100)])
+        avg_weighting = df[~df['excluded']]['weighting'].mean()
+
+        summary_data = [
+            ['Total rader i datasett', len(df)],
+            ['Kartlagte rader (aktive)', len(df[~df['excluded'] & df['mapped_scenario'].notna()])],
+            ['Ekskluderte rader', int(df['excluded'].sum())],
+            ['Antall scenarioer', len(structure)],
+            ['Gjennomsnittlig vekting (%)', f"{avg_weighting:.1f}%"],
+            ['Rader med redusert vekt', weighted_rows],
         ]
 
-        for label, value in metrics_data:
-            ws_summary[f'A{row}'] = label
-            ws_summary[f'B{row}'] = value
-            ws_summary[f'A{row}'].font = Font(bold=True)
-            ws_summary[f'A{row}'].fill = PatternFill(start_color='E3F2FD', end_color='E3F2FD', fill_type='solid')
+        for label, value in summary_data:
+            ws_meta[f'A{row}'] = label
+            ws_meta[f'B{row}'] = value
+            ws_meta[f'A{row}'].font = Font(bold=True)
+            ws_meta[f'A{row}'].fill = PatternFill(start_color='E3F2FD', end_color='E3F2FD', fill_type='solid')
             row += 1
 
+        row += 2
+
+        # Column definitions
+        ws_meta[f'A{row}'] = 'KOLONNEDEFINISJONER'
+        ws_meta[f'A{row}'].font = Font(size=12, bold=True, color='1565C0')
         row += 1
 
-        # Executive Summary
-        ws_summary[f'A{row}'] = 'SAMMENDRAG'
-        ws_summary[f'A{row}'].font = Font(size=14, bold=True, color='1565C0')
+        definitions = [
+            ['Scenario', 'Prosjektalternativ (A, B, C, D)'],
+            ['Disiplin', 'Fagområde (ARK, RIV, RIE, RIB, RIBp)'],
+            ['MMI', 'Byggdel kategori (300=NY, 700=EKS, 800=GJEN, 900=RIVES)'],
+            ['Vekting %', 'Prosentvis vekting av GWP (0-100%)'],
+            ['Konstruksjon (A)', 'GWP i byggefase (kg CO2e)'],
+            ['Drift (B)', 'GWP i driftsfase (kg CO2e)'],
+            ['Avslutning (C)', 'GWP i avslutningsfase (kg CO2e)'],
+            ['GWP basis', 'Total GWP uten vekting'],
+            ['GWP vektet', 'Total GWP med vekting'],
+        ]
+
+        ws_meta[f'A{row}'] = 'Kolonne'
+        ws_meta[f'B{row}'] = 'Beskrivelse'
+        for col in ['A', 'B']:
+            ws_meta[f'{col}{row}'].font = Font(bold=True)
+            ws_meta[f'{col}{row}'].fill = PatternFill(start_color='E3F2FD', end_color='E3F2FD', fill_type='solid')
         row += 1
 
-        for summary in insights['executive_summary']:
-            ws_summary[f'A{row}'] = summary
-            ws_summary[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
-            ws_summary.row_dimensions[row].height = 30
-            ws_summary.merge_cells(f'A{row}:D{row}')
+        for col_name, desc in definitions:
+            ws_meta[f'A{row}'] = col_name
+            ws_meta[f'B{row}'] = desc
             row += 1
-
-        row += 1
-
-        # Key Findings
-        ws_summary[f'A{row}'] = 'HOVEDFUNN'
-        ws_summary[f'A{row}'].font = Font(size=14, bold=True, color='1565C0')
-        row += 1
-
-        ws_summary[f'A{row}'] = 'Kategori'
-        ws_summary[f'B{row}'] = 'Verdi'
-        ws_summary[f'C{row}'] = 'Detaljer'
-        for col in ['A', 'B', 'C']:
-            ws_summary[f'{col}{row}'].font = Font(bold=True)
-            ws_summary[f'{col}{row}'].fill = PatternFill(start_color='E3F2FD', end_color='E3F2FD', fill_type='solid')
-        row += 1
-
-        for finding in insights['key_findings']:
-            ws_summary[f'A{row}'] = finding['title']
-            ws_summary[f'B{row}'] = finding['value']
-            ws_summary[f'C{row}'] = finding['description']
-
-            # Color coding
-            if finding['color'] == 'green':
-                fill_color = 'C8E6C9'
-            elif finding['color'] == 'red':
-                fill_color = 'FFCDD2'
-            elif finding['color'] == 'yellow':
-                fill_color = 'FFF9C4'
-            else:
-                fill_color = 'E3F2FD'
-
-            ws_summary[f'B{row}'].fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type='solid')
-            ws_summary[f'B{row}'].font = Font(bold=True)
-            row += 1
-
-        row += 1
-
-        # Recommendations
-        if insights['recommendations']:
-            ws_summary[f'A{row}'] = 'ANBEFALINGER'
-            ws_summary[f'A{row}'].font = Font(size=14, bold=True, color='1565C0')
-            row += 1
-
-            for i, rec in enumerate(insights['recommendations'], 1):
-                ws_summary[f'A{row}'] = f"{i}. {rec}"
-                ws_summary[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
-                ws_summary.row_dimensions[row].height = 40
-                ws_summary.merge_cells(f'A{row}:D{row}')
-                row += 1
 
         # Column widths
-        ws_summary.column_dimensions['A'].width = 30
-        ws_summary.column_dimensions['B'].width = 20
-        ws_summary.column_dimensions['C'].width = 40
-        ws_summary.column_dimensions['D'].width = 15
+        ws_meta.column_dimensions['A'].width = 25
+        ws_meta.column_dimensions['B'].width = 60
 
         # ==============================================================================
-        # SHEET 2: SCENARIO SUMMARY WITH CHART
+        # SHEET 2: SCENARIO SUMMARY (NO CHARTS)
         # ==============================================================================
-        scenario_summary.to_excel(writer, sheet_name='📈 Scenarioer', startrow=2, index=False)
-        ws_scenarios = writer.sheets['📈 Scenarioer']
-
-        # Title
-        ws_scenarios['A1'] = 'SCENARIO-OPPSUMMERING'
-        ws_scenarios['A1'].font = Font(size=14, bold=True, color='1565C0')
+        scenario_summary.to_excel(writer, sheet_name='📊 Scenarioer', startrow=1, index=False)
+        ws_scenarios = writer.sheets['📊 Scenarioer']
 
         # Header formatting
         for col in range(1, len(scenario_summary.columns) + 1):
-            cell = ws_scenarios.cell(3, col)
+            cell = ws_scenarios.cell(2, col)
             cell.font = Font(bold=True, color='FFFFFF')
             cell.fill = PatternFill(start_color='1565C0', end_color='1565C0', fill_type='solid')
             cell.alignment = Alignment(horizontal='center')
 
-        # Add stacked bar chart
-        chart = BarChart()
-        chart.type = "col"
-        chart.style = 10
-        chart.title = "GWP per Scenario (kg CO2e)"
-        chart.y_axis.title = 'kg CO2e'
-        chart.x_axis.title = 'Scenario'
-        chart.grouping = "stacked"
-        chart.overlap = 100
-
-        data = Reference(ws_scenarios, min_col=2, min_row=3, max_row=len(scenario_summary)+3, max_col=5)
-        cats = Reference(ws_scenarios, min_col=1, min_row=4, max_row=len(scenario_summary)+3)
-        chart.add_data(data, titles_from_data=True)
-        chart.set_categories(cats)
-        chart.height = 15
-        chart.width = 25
-
-        ws_scenarios.add_chart(chart, f"A{len(scenario_summary)+7}")
+        # Auto-size columns
+        for col in ws_scenarios.columns:
+            max_length = 0
+            column = col[0].column_letter
+            for cell in col:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            adjusted_width = min(max_length + 2, 50)
+            ws_scenarios.column_dimensions[column].width = adjusted_width
 
         # ==============================================================================
-        # SHEET 3: C vs A COMPARISON WITH CHART
+        # SHEET 3: C vs A COMPARISON (NO CHARTS)
         # ==============================================================================
         if 'C' in structure and 'A' in structure:
             from .data_parser import compare_scenarios
@@ -379,55 +346,46 @@ def generate_excel_report(df: pd.DataFrame, structure: Dict[str, Any],
 
                     comp_data.append({
                         'LCA-fase': label,
-                        'Scenario A': base_val,
-                        'Scenario C': comp_val,
+                        'Scenario A (kg CO2e)': base_val,
+                        'Scenario C (kg CO2e)': comp_val,
                         'Differanse (C-A)': diff,
                         'Ratio (C/A) %': ratio,
                         'Vurdering': verdict
                     })
 
                 comp_df = pd.DataFrame(comp_data)
-                comp_df.to_excel(writer, sheet_name='🔄 C vs A', startrow=2, index=False)
+                comp_df.to_excel(writer, sheet_name='🔄 C vs A', startrow=1, index=False)
                 ws_comp = writer.sheets['🔄 C vs A']
-
-                # Title
-                ws_comp['A1'] = 'SCENARIO C vs A SAMMENLIGNING'
-                ws_comp['A1'].font = Font(size=14, bold=True, color='1565C0')
 
                 # Header formatting
                 for col in range(1, len(comp_df.columns) + 1):
-                    cell = ws_comp.cell(3, col)
+                    cell = ws_comp.cell(2, col)
                     cell.font = Font(bold=True, color='FFFFFF')
                     cell.fill = PatternFill(start_color='1565C0', end_color='1565C0', fill_type='solid')
+                    cell.alignment = Alignment(horizontal='center')
 
-                # Conditional formatting on ratio column
-                for row_idx in range(4, len(comp_data) + 4):
+                # Conditional formatting on ratio column (column 5)
+                for row_idx in range(3, len(comp_data) + 3):
                     ratio_cell = ws_comp.cell(row_idx, 5)
                     ratio_val = ratio_cell.value
 
-                    if ratio_val < 100:
+                    if ratio_val and ratio_val < 100:
                         ratio_cell.fill = PatternFill(start_color='C8E6C9', end_color='C8E6C9', fill_type='solid')
-                    else:
+                    elif ratio_val:
                         ratio_cell.fill = PatternFill(start_color='FFCDD2', end_color='FFCDD2', fill_type='solid')
 
-                # Add comparison bar chart
-                chart_comp = BarChart()
-                chart_comp.type = "col"
-                chart_comp.style = 11
-                chart_comp.title = "Scenario A vs C Sammenligning"
-                chart_comp.y_axis.title = 'kg CO2e'
-
-                data_comp = Reference(ws_comp, min_col=2, min_row=3, max_row=len(comp_data)+3, max_col=3)
-                cats_comp = Reference(ws_comp, min_col=1, min_row=4, max_row=len(comp_data)+3)
-                chart_comp.add_data(data_comp, titles_from_data=True)
-                chart_comp.set_categories(cats_comp)
-                chart_comp.height = 12
-                chart_comp.width = 20
-
-                ws_comp.add_chart(chart_comp, f"A{len(comp_data)+7}")
+                # Auto-size columns
+                for col in ws_comp.columns:
+                    max_length = 0
+                    column = col[0].column_letter
+                    for cell in col:
+                        if cell.value:
+                            max_length = max(max_length, len(str(cell.value)))
+                    adjusted_width = min(max_length + 2, 50)
+                    ws_comp.column_dimensions[column].width = adjusted_width
 
         # ==============================================================================
-        # SHEET 4: MMI DISTRIBUTION WITH PIE CHART
+        # SHEET 4: MMI DISTRIBUTION (NO CHARTS)
         # ==============================================================================
         from .visualizations import get_mmi_summary_stats
         mmi_dist_data = []
@@ -440,36 +398,29 @@ def generate_excel_report(df: pd.DataFrame, structure: Dict[str, Any],
         if mmi_dist_data:
             mmi_dist_df = pd.concat(mmi_dist_data, ignore_index=True)
             mmi_dist_df = mmi_dist_df[['Scenario', 'MMI', 'Status', 'GWP (kg CO2e)', 'Andel (%)', 'Antall rader']]
-            mmi_dist_df.to_excel(writer, sheet_name='🏗️ MMI Fordeling', startrow=2, index=False)
+            mmi_dist_df.to_excel(writer, sheet_name='🏗️ MMI', startrow=1, index=False)
 
-            ws_mmi = writer.sheets['🏗️ MMI Fordeling']
-            ws_mmi['A1'] = 'MMI-FORDELING PER SCENARIO'
-            ws_mmi['A1'].font = Font(size=14, bold=True, color='1565C0')
+            ws_mmi = writer.sheets['🏗️ MMI']
 
             # Header formatting
             for col in range(1, len(mmi_dist_df.columns) + 1):
-                cell = ws_mmi.cell(3, col)
+                cell = ws_mmi.cell(2, col)
                 cell.font = Font(bold=True, color='FFFFFF')
                 cell.fill = PatternFill(start_color='1565C0', end_color='1565C0', fill_type='solid')
+                cell.alignment = Alignment(horizontal='center')
 
-            # Add pie chart for first scenario
-            if len(structure) > 0:
-                first_scenario = sorted(structure.keys())[0]
-                scenario_mmi = mmi_dist_df[mmi_dist_df['Scenario'] == first_scenario]
-
-                pie = PieChart()
-                pie.title = f"MMI-fordeling Scenario {first_scenario}"
-                labels = Reference(ws_mmi, min_col=2, min_row=4, max_row=3+len(scenario_mmi))
-                data_pie = Reference(ws_mmi, min_col=4, min_row=3, max_row=3+len(scenario_mmi))
-                pie.add_data(data_pie, titles_from_data=True)
-                pie.set_categories(labels)
-                pie.height = 12
-                pie.width = 16
-
-                ws_mmi.add_chart(pie, f"H3")
+            # Auto-size columns
+            for col in ws_mmi.columns:
+                max_length = 0
+                column = col[0].column_letter
+                for cell in col:
+                    if cell.value:
+                        max_length = max(max_length, len(str(cell.value)))
+                adjusted_width = min(max_length + 2, 50)
+                ws_mmi.column_dimensions[column].width = adjusted_width
 
         # ==============================================================================
-        # SHEET 5: DISCIPLINE BREAKDOWN WITH CHART
+        # SHEET 5: DISCIPLINE BREAKDOWN (NO CHARTS)
         # ==============================================================================
         discipline_data = []
         for scenario, scenario_data in structure.items():
@@ -477,75 +428,95 @@ def generate_excel_report(df: pd.DataFrame, structure: Dict[str, Any],
                 discipline_data.append({
                     'Scenario': scenario,
                     'Disiplin': discipline,
-                    'Konstruksjon (A)': disc_data['total']['construction_a'],
-                    'Drift (B)': disc_data['total']['operation_b'],
-                    'Avslutning (C)': disc_data['total']['end_of_life_c'],
-                    'Total GWP': disc_data['total']['total_gwp'],
+                    'Konstruksjon (A) (kg CO2e)': disc_data['total']['construction_a'],
+                    'Drift (B) (kg CO2e)': disc_data['total']['operation_b'],
+                    'Avslutning (C) (kg CO2e)': disc_data['total']['end_of_life_c'],
+                    'Total GWP (kg CO2e)': disc_data['total']['total_gwp'],
                     'Antall rader': disc_data['total']['count']
                 })
 
         if discipline_data:
+            # Sort by total GWP descending
             disc_df = pd.DataFrame(discipline_data)
-            disc_df.to_excel(writer, sheet_name='👷 Disipliner', startrow=2, index=False)
+            disc_df = disc_df.sort_values('Total GWP (kg CO2e)', ascending=False)
+            disc_df.to_excel(writer, sheet_name='👷 Disipliner', startrow=1, index=False)
 
             ws_disc = writer.sheets['👷 Disipliner']
-            ws_disc['A1'] = 'DISIPLIN-ANALYSE'
-            ws_disc['A1'].font = Font(size=14, bold=True, color='1565C0')
 
             # Header formatting
             for col in range(1, len(disc_df.columns) + 1):
-                cell = ws_disc.cell(3, col)
+                cell = ws_disc.cell(2, col)
                 cell.font = Font(bold=True, color='FFFFFF')
                 cell.fill = PatternFill(start_color='1565C0', end_color='1565C0', fill_type='solid')
+                cell.alignment = Alignment(horizontal='center')
 
-            # Add stacked bar chart
-            chart_disc = BarChart()
-            chart_disc.type = "col"
-            chart_disc.style = 10
-            chart_disc.title = "GWP per Disiplin"
-            chart_disc.y_axis.title = 'kg CO2e'
-            chart_disc.grouping = "stacked"
-            chart_disc.overlap = 100
-
-            data_disc = Reference(ws_disc, min_col=3, min_row=3, max_row=len(disc_df)+3, max_col=6)
-            cats_disc = Reference(ws_disc, min_col=2, min_row=4, max_row=len(disc_df)+3)
-            chart_disc.add_data(data_disc, titles_from_data=True)
-            chart_disc.set_categories(cats_disc)
-            chart_disc.height = 15
-            chart_disc.width = 25
-
-            ws_disc.add_chart(chart_disc, f"A{len(disc_df)+7}")
+            # Auto-size columns
+            for col in ws_disc.columns:
+                max_length = 0
+                column = col[0].column_letter
+                for cell in col:
+                    if cell.value:
+                        max_length = max(max_length, len(str(cell.value)))
+                adjusted_width = min(max_length + 2, 50)
+                ws_disc.column_dimensions[column].width = adjusted_width
 
         # ==============================================================================
-        # SHEET 6: RAW DATA WITH WEIGHTING
+        # SHEET 6: COMPLETE DATASET WITH ALL FIELDS
         # ==============================================================================
         active_df = df[~df['excluded'] & df['mapped_scenario'].notna()].copy()
+
+        # Select and rename columns for export
         export_cols = [
-            'category', 'mapped_scenario', 'mapped_discipline', 'mapped_mmi_code', 'weighting',
-            'construction_a', 'operation_b', 'end_of_life_c', 'total_gwp_base', 'total_gwp'
+            'category',
+            'mapped_scenario',
+            'mapped_discipline',
+            'mapped_mmi_code',
+            'weighting',
+            'construction_a',
+            'operation_b',
+            'end_of_life_c',
+            'total_gwp_base',
+            'total_gwp'
         ]
+
         active_export = active_df[export_cols].rename(columns={
             'category': 'Kategori',
             'mapped_scenario': 'Scenario',
             'mapped_discipline': 'Disiplin',
             'mapped_mmi_code': 'MMI',
-            'weighting': 'Vekting %',
-            'construction_a': 'Konstruksjon (A)',
-            'operation_b': 'Drift (B)',
-            'end_of_life_c': 'Avslutning (C)',
-            'total_gwp_base': 'GWP basis',
-            'total_gwp': 'GWP vektet'
+            'weighting': 'Vekting (%)',
+            'construction_a': 'Konstruksjon (A) (kg CO2e)',
+            'operation_b': 'Drift (B) (kg CO2e)',
+            'end_of_life_c': 'Avslutning (C) (kg CO2e)',
+            'total_gwp_base': 'GWP basis (kg CO2e)',
+            'total_gwp': 'GWP vektet (kg CO2e)'
         })
-        active_export.to_excel(writer, sheet_name='📋 Kartlagt data', index=False)
 
-        # Format weighting column
-        ws_data = writer.sheets['📋 Kartlagt data']
+        # Sort by scenario, then discipline, then MMI
+        active_export = active_export.sort_values(['Scenario', 'Disiplin', 'MMI'])
+        active_export.to_excel(writer, sheet_name='📋 Komplett datasett', startrow=1, index=False)
+
+        ws_data = writer.sheets['📋 Komplett datasett']
+
+        # Header formatting
         for col in range(1, len(active_export.columns) + 1):
-            cell = ws_data.cell(1, col)
+            cell = ws_data.cell(2, col)
             cell.font = Font(bold=True, color='FFFFFF')
             cell.fill = PatternFill(start_color='1565C0', end_color='1565C0', fill_type='solid')
+            cell.alignment = Alignment(horizontal='center')
+
+        # Auto-size columns
+        for col in ws_data.columns:
+            max_length = 0
+            column = col[0].column_letter
+            for cell in col:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            adjusted_width = min(max_length + 2, 50)
+            ws_data.column_dimensions[column].width = adjusted_width
 
     excel_output.seek(0)
+    logger.info("Excel export completed successfully")
     return excel_output
 
 
@@ -587,11 +558,105 @@ def plotly_to_image(fig: go.Figure, width: int = 800, height: int = 500) -> Opti
     Uses kaleido if available, otherwise returns None.
     """
     try:
+        logger.info(f"Converting plotly figure to image: {width}x{height}px")
         img_bytes = fig.to_image(format="png", width=width, height=height, scale=2, engine="kaleido")
+        logger.info("Successfully converted plotly figure to image")
         return io.BytesIO(img_bytes)
-    except:
-        # If kaleido not available, return None
+    except ImportError as e:
+        logger.error(f"Kaleido not installed or import failed: {e}")
         return None
+    except ValueError as e:
+        logger.error(f"Invalid figure or parameters: {e}")
+        return None
+    except TimeoutError as e:
+        logger.warning(f"Kaleido timeout (first call can take 5+ minutes): {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error converting plotly to image: {type(e).__name__}: {e}", exc_info=True)
+        return None
+
+
+def create_metric_box(label: str, value: str, color: str = 'blue', width: float = 6) -> Table:
+    """
+    Create a visual callout box for key metrics.
+
+    Args:
+        label: Metric label (e.g., "C vs A Ratio")
+        value: Metric value (e.g., "95.2%")
+        color: Color theme - 'green', 'red', 'blue', 'yellow'
+        width: Width in cm
+
+    Returns:
+        ReportLab Table object
+    """
+    color_map = {
+        'green': colors.HexColor('#4CAF50'),
+        'red': colors.HexColor('#F44336'),
+        'blue': colors.HexColor('#1565C0'),
+        'yellow': colors.HexColor('#FFC107'),
+        'grey': colors.HexColor('#757575')
+    }
+
+    bg_color = color_map.get(color, colors.HexColor('#1565C0'))
+
+    data = [[label], [value]]
+    table = Table(data, colWidths=[width*cm], rowHeights=[0.8*cm, 1.8*cm])
+    table.setStyle(TableStyle([
+        # Header row
+        ('BACKGROUND', (0, 0), (-1, 0), bg_color),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 9),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+
+        # Value row
+        ('BACKGROUND', (0, 1), (-1, 1), colors.HexColor('#F5F5F5')),
+        ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 1), (-1, 1), 24),
+        ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
+        ('VALIGN', (0, 1), (-1, 1), 'MIDDLE'),
+
+        # Border
+        ('BOX', (0, 0), (-1, -1), 2, bg_color),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+    ]))
+    return table
+
+
+def create_section_divider() -> Table:
+    """
+    Create a visual divider line between sections.
+
+    Returns:
+        ReportLab Table object
+    """
+    divider = Table([['']], colWidths=[16*cm], rowHeights=[0.2*cm])
+    divider.setStyle(TableStyle([
+        ('LINEABOVE', (0, 0), (-1, 0), 3, colors.HexColor('#1565C0')),
+        ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#E3F2FD'))
+    ]))
+    return divider
+
+
+def test_kaleido() -> bool:
+    """
+    Test if Kaleido is working correctly.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        logger.info("Testing Kaleido installation...")
+        test_fig = go.Figure(go.Bar(x=['Test'], y=[1]))
+        test_bytes = test_fig.to_image(format="png", engine="kaleido", width=100, height=100)
+        logger.info("✓ Kaleido is working correctly")
+        return True
+    except ImportError as e:
+        logger.error(f"✗ Kaleido import failed: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"✗ Kaleido test failed: {type(e).__name__}: {e}")
+        return False
 
 
 def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
@@ -600,6 +665,13 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
     Generate comprehensive PDF report (MASTER DOCUMENT).
     Self-contained with all charts, tables, and insights.
     """
+    logger.info("Starting PDF report generation...")
+
+    # Test Kaleido before generating report
+    kaleido_available = test_kaleido()
+    if not kaleido_available:
+        logger.warning("Charts will not be included in PDF - Kaleido is not available")
+
     pdf_output = io.BytesIO()
     doc = SimpleDocTemplate(pdf_output, pagesize=A4, topMargin=2*cm, bottomMargin=2.5*cm)
 
@@ -702,16 +774,71 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F5F5F5')])
     ]))
     elements.append(metrics_table)
-
-    elements.append(PageBreak())
+    elements.append(Spacer(1, 0.8*cm))
 
     # ==============================================================================
-    # EXECUTIVE SUMMARY
+    # VISUAL KPIs - KEY METRICS BOXES
+    # ==============================================================================
+    if 'C' in structure and 'A' in structure:
+        from .data_parser import compare_scenarios
+        comparison = compare_scenarios(structure, 'A', 'C')
+
+        if comparison and comparison['ratio']['total_gwp']:
+            ratio = comparison['ratio']['total_gwp']
+            diff = comparison['difference']['total_gwp']
+
+            # Determine color based on ratio
+            if ratio < 95:
+                color = 'green'
+            elif ratio < 105:
+                color = 'yellow'
+            else:
+                color = 'red'
+
+            # Create 3 metric boxes side by side
+            box1 = create_metric_box("C vs A Ratio", f"{ratio:.1f}%", color, width=5)
+            box2 = create_metric_box("Differanse", f"{diff:+,.0f} kg", color, width=5)
+            box3 = create_metric_box("Datakvalitet", f"{completeness:.0f}%", 'blue', width=5)
+
+            boxes_table = Table([[box1, box2, box3]], colWidths=[5.2*cm, 5.2*cm, 5.2*cm])
+            boxes_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            elements.append(boxes_table)
+            elements.append(Spacer(1, 0.6*cm))
+
+            # Add verdict paragraph
+            if ratio < 100:
+                verdict = f"✓ Scenario C har {abs(100-ratio):.1f}% lavere klimagassutslipp enn Scenario A"
+                verdict_color = colors.HexColor('#4CAF50')
+            else:
+                verdict = f"✗ Scenario C har {ratio-100:.1f}% høyere klimagassutslipp enn Scenario A"
+                verdict_color = colors.HexColor('#F44336')
+
+            verdict_style = ParagraphStyle(
+                'Verdict',
+                parent=body_style,
+                fontSize=12,
+                textColor=verdict_color,
+                alignment=TA_CENTER,
+                spaceAfter=12,
+                fontName='Helvetica-Bold'
+            )
+            elements.append(Paragraph(verdict, verdict_style))
+
+    elements.append(create_section_divider())
+    elements.append(Spacer(1, 0.4*cm))
+
+    # ==============================================================================
+    # EXECUTIVE SUMMARY - CONDENSED
     # ==============================================================================
     elements.append(Paragraph("SAMMENDRAG", heading_style))
 
+    # Convert summary to bullet points for scannability
     for summary in insights['executive_summary']:
-        elements.append(Paragraph(summary, body_style))
+        bullet_text = f"• {summary}"
+        elements.append(Paragraph(bullet_text, body_style))
 
     elements.append(Spacer(1, 0.3*cm))
 
@@ -751,19 +878,42 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
 
     # Recommendations
     if insights['recommendations']:
-        rec_elements = []
-        rec_elements.append(Paragraph("ANBEFALINGER", heading_style))
-
+        elements.append(Paragraph("ANBEFALINGER", heading3_style))
         for i, rec in enumerate(insights['recommendations'], 1):
-            rec_elements.append(Paragraph(f"{i}. {rec}", body_style))
+            elements.append(Paragraph(f"• {rec}", body_style))
+        elements.append(Spacer(1, 0.2*cm))
 
-        elements.append(KeepTogether(rec_elements))
+    # Add hero chart on page 1 if comparison available
+    if 'C' in structure and 'A' in structure:
+        from .data_parser import compare_scenarios
+        comparison = compare_scenarios(structure, 'A', 'C')
+
+        if comparison and kaleido_available:
+            try:
+                elements.append(create_section_divider())
+                elements.append(Spacer(1, 0.3*cm))
+                elements.append(Paragraph("SCENARIO C vs A - VISUELL SAMMENLIGNING", heading_style))
+
+                from .visualizations import create_comparison_chart
+                fig_diff = create_comparison_chart(comparison, 'difference')
+                img_diff = plotly_to_image(fig_diff, width=650, height=320)
+
+                if img_diff:
+                    img = Image(img_diff, width=15*cm, height=7.5*cm)
+                    elements.append(img)
+                else:
+                    logger.warning("Failed to generate comparison chart for page 1")
+            except Exception as e:
+                logger.error(f"Error adding hero chart to page 1: {e}")
 
     elements.append(PageBreak())
 
     # ==============================================================================
     # SCENARIO SUMMARY WITH CHART
     # ==============================================================================
+    elements.append(create_section_divider())
+    elements.append(Spacer(1, 0.4*cm))
+
     scenario_elements = []
     scenario_elements.append(Paragraph("SCENARIO-OPPSUMMERING", heading_style))
 
@@ -809,9 +959,15 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
             img = Image(img_bytes, width=14*cm, height=8*cm)
             scenario_elements.append(img)
         else:
-            scenario_elements.append(Paragraph("(Diagram ikke tilgjengelig)", body_style))
+            logger.warning("Scenario stacked bar chart not available")
+            if not kaleido_available:
+                scenario_elements.append(Paragraph(
+                    "⚠ Diagram krever Kaleido. Installer med: pip install kaleido",
+                    body_style
+                ))
     except Exception as e:
-        scenario_elements.append(Paragraph(f"(Diagram ikke tilgjengelig)", body_style))
+        logger.error(f"Error generating scenario chart: {e}")
+        scenario_elements.append(Paragraph("⚠ Feil ved generering av diagram", body_style))
 
     elements.extend(scenario_elements)
     elements.append(PageBreak())
@@ -819,6 +975,9 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
     # ==============================================================================
     # C vs A COMPARISON WITH CHARTS
     # ==============================================================================
+    elements.append(create_section_divider())
+    elements.append(Spacer(1, 0.4*cm))
+
     if 'C' in structure and 'A' in structure:
         from .data_parser import compare_scenarios
         comparison = compare_scenarios(structure, 'A', 'C')
@@ -915,6 +1074,9 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
     # ==============================================================================
     # MMI ANALYSIS WITH CHARTS
     # ==============================================================================
+    elements.append(create_section_divider())
+    elements.append(Spacer(1, 0.4*cm))
+
     if structure:
         elements.append(Paragraph("MMI-ANALYSE", heading_style))
 
@@ -982,6 +1144,8 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
     # DISCIPLINE BREAKDOWN
     # ==============================================================================
     elements.append(PageBreak())
+    elements.append(create_section_divider())
+    elements.append(Spacer(1, 0.4*cm))
     elements.append(Paragraph("DISIPLIN-ANALYSE", heading_style))
 
     discipline_data = []

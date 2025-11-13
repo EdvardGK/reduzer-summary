@@ -8,8 +8,26 @@ One page. Zero navigation. Just scroll.
 
 import streamlit as st
 import pandas as pd
+import logging
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
+
+# Setup logging
+log_dir = Path("outputs/logs")
+log_dir.mkdir(parents=True, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_dir / 'app.log'),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+logger.info("=== LCA Scenario Mapping Application Started ===")
 
 from utils.data_parser import (
     load_excel_file,
@@ -319,7 +337,7 @@ edited_df = st.data_editor(
         'mapped_discipline': st.column_config.SelectboxColumn('Disiplin', options=DISCIPLINES, width='small'),
         'suggested_mmi_code': st.column_config.NumberColumn('Forslag M', width='small', disabled=True),
         'mapped_mmi_code': st.column_config.SelectboxColumn('MMI', options=list(MMI_CODES.keys()), width='small'),
-        'weighting': st.column_config.NumberColumn('Vekting %', min_value=0, max_value=100, format="%.0f%%", width='small'),
+        'weighting': st.column_config.NumberColumn('Vekting %', min_value=0, max_value=100, step=5, format="%.0f", width='small', help="0-100% vekting av GWP"),
         'excluded': st.column_config.CheckboxColumn('Ekskludert', width='small'),
         'construction_a': st.column_config.NumberColumn('Konstr (A)', format="%.0f", disabled=True, width='small'),
         'operation_b': st.column_config.NumberColumn('Drift (B)', format="%.0f", disabled=True, width='small'),
@@ -342,9 +360,10 @@ for idx, row in edited_df.iterrows():
         if col in row:
             df.at[original_idx, col] = row[col]
 
-    # Recalculate weighted GWP after weighting changes
-    weighting_pct = df.at[original_idx, 'weighting'] / 100.0
-    df.at[original_idx, 'total_gwp'] = df.at[original_idx, 'total_gwp_base'] * weighting_pct
+# Recalculate all weighted GWP values after edits
+df['weighting'] = pd.to_numeric(df['weighting'], errors='coerce').fillna(100.0)
+df['weighting'] = df['weighting'].clip(lower=0, upper=100)  # Ensure 0-100 range
+df['total_gwp'] = df['total_gwp_base'] * (df['weighting'] / 100.0)
 
 st.session_state['df'] = df
 st.session_state['pipeline_step'] = max(st.session_state['pipeline_step'], 3)
@@ -545,14 +564,46 @@ st.markdown("---")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    # Export mapping data
-    csv_data = df.to_csv(index=False)
+    # Export complete mapped data as CSV
+    active_df = df[~df['excluded'] & df['mapped_scenario'].notna()].copy()
+
+    export_cols = [
+        'category',
+        'mapped_scenario',
+        'mapped_discipline',
+        'mapped_mmi_code',
+        'weighting',
+        'construction_a',
+        'operation_b',
+        'end_of_life_c',
+        'total_gwp_base',
+        'total_gwp'
+    ]
+
+    csv_export = active_df[export_cols].rename(columns={
+        'category': 'Kategori',
+        'mapped_scenario': 'Scenario',
+        'mapped_discipline': 'Disiplin',
+        'mapped_mmi_code': 'MMI',
+        'weighting': 'Vekting_pct',
+        'construction_a': 'Konstruksjon_A_kg_CO2e',
+        'operation_b': 'Drift_B_kg_CO2e',
+        'end_of_life_c': 'Avslutning_C_kg_CO2e',
+        'total_gwp_base': 'GWP_basis_kg_CO2e',
+        'total_gwp': 'GWP_vektet_kg_CO2e'
+    })
+
+    # Sort for clean export
+    csv_export = csv_export.sort_values(['Scenario', 'Disiplin', 'MMI'])
+    csv_data = csv_export.to_csv(index=False, encoding='utf-8-sig')  # UTF-8 with BOM for Excel compatibility
+
     st.download_button(
-        "📋 Export Mapped Data (CSV)",
+        "📋 Download Complete Dataset (CSV)",
         data=csv_data,
-        file_name=f"mapped_data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        file_name=f"lca_data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
         mime="text/csv",
-        use_container_width=True
+        use_container_width=True,
+        help="All mapped rows with weighting - ready for analysis"
     )
 
 with col3:

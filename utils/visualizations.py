@@ -239,6 +239,7 @@ def create_comparison_chart(comparison: Dict[str, Any], chart_type: str = 'diffe
 def create_discipline_comparison_chart(structure: Dict[str, Any], scenario: str) -> go.Figure:
     """
     Create stacked bar chart comparing disciplines within a scenario.
+    Sorted by total GWP (highest to lowest).
 
     Args:
         structure: Hierarchical structure
@@ -250,16 +251,24 @@ def create_discipline_comparison_chart(structure: Dict[str, Any], scenario: str)
     if scenario not in structure:
         return go.Figure()
 
-    disciplines = []
-    construction = []
-    operation = []
-    end_of_life = []
-
+    # Collect data and sort by total GWP
+    disc_data = []
     for discipline, data in structure[scenario]['disciplines'].items():
-        disciplines.append(discipline)
-        construction.append(data['total']['construction_a'])
-        operation.append(data['total']['operation_b'])
-        end_of_life.append(data['total']['end_of_life_c'])
+        disc_data.append({
+            'discipline': discipline,
+            'construction_a': data['total']['construction_a'],
+            'operation_b': data['total']['operation_b'],
+            'end_of_life_c': data['total']['end_of_life_c'],
+            'total_gwp': data['total']['total_gwp']
+        })
+
+    # Sort by total GWP descending
+    disc_data.sort(key=lambda x: x['total_gwp'], reverse=True)
+
+    disciplines = [d['discipline'] for d in disc_data]
+    construction = [d['construction_a'] for d in disc_data]
+    operation = [d['operation_b'] for d in disc_data]
+    end_of_life = [d['end_of_life_c'] for d in disc_data]
 
     fig = go.Figure()
 
@@ -387,13 +396,14 @@ MMI_LABELS_NO = {
 }
 
 
-def create_mmi_distribution_pie(structure: Dict[str, Any], scenario: str) -> go.Figure:
+def create_mmi_distribution_pie(structure: Dict[str, Any], scenario: str, top_n: int = 5) -> go.Figure:
     """
     Create pie chart showing MMI distribution (by GWP) within a scenario.
 
     Args:
         structure: Hierarchical structure
         scenario: Scenario to visualize
+        top_n: Number of top categories to show (rest combined as "Andre")
 
     Returns:
         Plotly figure
@@ -412,10 +422,19 @@ def create_mmi_distribution_pie(structure: Dict[str, Any], scenario: str) -> go.
     if not mmi_totals:
         return go.Figure()
 
+    # Sort by value and limit to top N
+    sorted_mmi = sorted(mmi_totals.items(), key=lambda x: x[1], reverse=True)
+
+    if len(sorted_mmi) > top_n:
+        top_items = sorted_mmi[:top_n]
+        other_sum = sum(val for _, val in sorted_mmi[top_n:])
+        top_items.append(('ANDRE', other_sum))
+        sorted_mmi = top_items
+
     # Prepare data
-    labels = [f"{MMI_LABELS_NO.get(code, code)} ({code})" for code in mmi_totals.keys()]
-    values = list(mmi_totals.values())
-    colors_list = [MMI_COLORS.get(code, '#999999') for code in mmi_totals.keys()]
+    labels = [f"{MMI_LABELS_NO.get(code, code)} ({code})" if code != 'ANDRE' else "Andre" for code, _ in sorted_mmi]
+    values = [val for _, val in sorted_mmi]
+    colors_list = [MMI_COLORS.get(code, '#999999') if code != 'ANDRE' else '#CCCCCC' for code, _ in sorted_mmi]
 
     # Calculate percentages
     total = sum(values)
@@ -825,6 +844,7 @@ def create_all_disciplines_comparison(structure: Dict[str, Any], base_scenario: 
 def create_all_disciplines_comparison_chart(df: pd.DataFrame, base_scenario: str, compare_scenario: str) -> go.Figure:
     """
     Create grouped bar chart comparing all disciplines between two scenarios.
+    Sorted by total GWP (highest to lowest).
 
     Args:
         df: DataFrame from get_all_disciplines_comparison
@@ -837,20 +857,30 @@ def create_all_disciplines_comparison_chart(df: pd.DataFrame, base_scenario: str
     if df.empty:
         return go.Figure()
 
+    # Sort by sum of both scenarios
+    df['_sort_total'] = df[f'Scenario {base_scenario}'] + df[f'Scenario {compare_scenario}']
+    df = df.sort_values('_sort_total', ascending=False)
+
     fig = go.Figure()
 
     fig.add_trace(go.Bar(
         name=f'Scenario {base_scenario}',
         x=df['Disiplin'],
         y=df[f'Scenario {base_scenario}'],
-        marker_color='lightblue'
+        marker_color='#90CAF9',
+        text=df[f'Scenario {base_scenario}'].apply(lambda x: f'{x:,.0f}'),
+        textposition='outside',
+        textfont=dict(size=9)
     ))
 
     fig.add_trace(go.Bar(
         name=f'Scenario {compare_scenario}',
         x=df['Disiplin'],
         y=df[f'Scenario {compare_scenario}'],
-        marker_color='darkblue'
+        marker_color='#1565C0',
+        text=df[f'Scenario {compare_scenario}'].apply(lambda x: f'{x:,.0f}'),
+        textposition='outside',
+        textfont=dict(size=9)
     ))
 
     fig.update_layout(

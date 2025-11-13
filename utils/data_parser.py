@@ -80,15 +80,22 @@ def load_excel_file(file_path_or_buffer) -> pd.DataFrame:
     df['excluded'] = df['excluded'] | category_lower.str.contains('copy', na=False)
     df['excluded'] = df['excluded'] | category_lower.str.contains('kopi', na=False)
 
-    # Initialize weighting column (default 100% - full weight)
-    df['weighting'] = 100.0
-
     # Convert numeric columns to float
     for col in ['construction_a', 'operation_b', 'end_of_life_c']:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
     # Calculate total GWP (base value)
     df['total_gwp_base'] = df['construction_a'] + df['operation_b'] + df['end_of_life_c']
+
+    # Initialize weighting column (default 100% - full weight)
+    # Check if already exists (for reloads)
+    if 'weighting' not in df.columns:
+        df['weighting'] = 100.0
+    else:
+        df['weighting'] = pd.to_numeric(df['weighting'], errors='coerce').fillna(100.0)
+
+    # Ensure weighting is within valid range
+    df['weighting'] = df['weighting'].clip(lower=0, upper=100)
 
     # Calculate weighted GWP
     df['total_gwp'] = df['total_gwp_base'] * (df['weighting'] / 100.0)
