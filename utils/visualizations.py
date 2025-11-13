@@ -201,8 +201,8 @@ def create_comparison_chart(comparison: Dict[str, Any], chart_type: str = 'diffe
 
     if chart_type == 'difference':
         values = [comparison['difference'][key] for key in keys]
-        title = f"Differanse: Scenario {compare} - Scenario {base}"
-        yaxis_title = 'Differanse (kg CO2e)'
+        title = f"Forskjell: Scenario {compare} - Scenario {base}"
+        yaxis_title = 'Forskjell (kg CO2e)'
         colors = ['#4CAF50' if v < 0 else '#F44336' for v in values]
     else:  # ratio
         values = [comparison['ratio'][key] if comparison['ratio'][key] is not None else 0 for key in keys]
@@ -394,6 +394,75 @@ MMI_LABELS_NO = {
     '800': 'GJEN',
     '900': 'RIVES'
 }
+
+
+def create_mmi_distribution_by_discipline_pie(structure: Dict[str, Any], scenario: str, discipline: str) -> go.Figure:
+    """
+    Create pie chart showing MMI distribution for a specific discipline within a scenario.
+
+    Args:
+        structure: Hierarchical structure
+        scenario: Scenario to visualize
+        discipline: Discipline to show (ARK, RIV, etc.)
+
+    Returns:
+        Plotly figure
+    """
+    if scenario not in structure:
+        return go.Figure()
+
+    if discipline not in structure[scenario]['disciplines']:
+        return go.Figure()
+
+    disc_data = structure[scenario]['disciplines'][discipline]
+    mmi_totals = {}
+
+    for mmi_code, mmi_data in disc_data['mmi_categories'].items():
+        mmi_totals[mmi_code] = mmi_data['total_gwp']
+
+    if not mmi_totals or sum(mmi_totals.values()) == 0:
+        return go.Figure()
+
+    # Sort by value
+    sorted_mmi = sorted(mmi_totals.items(), key=lambda x: x[1], reverse=True)
+
+    labels = [f"{MMI_LABELS_NO.get(code, code)} ({code})" for code, _ in sorted_mmi]
+    values = [val for _, val in sorted_mmi]
+    colors_list = [MMI_COLORS.get(code, '#999999') for code, _ in sorted_mmi]
+
+    # Calculate percentages
+    total = sum(values)
+    percentages = [(v/total)*100 for v in values]
+
+    fig = go.Figure(go.Pie(
+        labels=labels,
+        values=values,
+        marker=dict(colors=colors_list),
+        textinfo='label+percent',
+        textposition='auto',
+        hovertemplate='<b>%{label}</b><br>%{value:,.0f} kg CO2e<br>%{percent}<extra></extra>',
+        hole=0.3  # Donut chart for modern look
+    ))
+
+    fig.update_layout(
+        title=dict(
+            text=f"MMI-fordeling: {discipline} (Scenario {scenario})",
+            font=dict(size=14)
+        ),
+        showlegend=True,
+        legend=dict(
+            orientation="v",
+            yanchor="middle",
+            y=0.5,
+            xanchor="left",
+            x=1.05,
+            font=dict(size=10)
+        ),
+        height=400,
+        margin=dict(l=20, r=150, t=60, b=20)
+    )
+
+    return fig
 
 
 def create_mmi_distribution_pie(structure: Dict[str, Any], scenario: str, top_n: int = 5) -> go.Figure:
@@ -789,7 +858,7 @@ def create_discipline_comparison_bar(comparison: Dict[str, Any], chart_type: str
     if chart_type == 'difference':
         values = [comparison['difference'][key] for key in keys]
         title = f"{discipline}: Scenario {compare} - Scenario {base}"
-        yaxis_title = 'Differanse (kg CO2e)'
+        yaxis_title = 'Forskjell (kg CO2e)'
         colors = ['green' if v < 0 else 'red' for v in values]
     else:  # ratio
         values = [comparison['ratio'][key] if comparison['ratio'][key] is not None else 0 for key in keys]

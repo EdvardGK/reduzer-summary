@@ -32,6 +32,40 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 
 
 # ==============================================================================
+# CSV EXPORT
+# ==============================================================================
+
+def generate_csv_report(df: pd.DataFrame) -> str:
+    """
+    Generate a CSV export of the complete dataset.
+
+    Args:
+        df: DataFrame with complete data
+
+    Returns:
+        CSV string
+    """
+    # Select relevant columns for export
+    export_cols = [
+        'category',
+        'mapped_scenario', 'mapped_discipline', 'mapped_mmi_code',
+        'weighting',
+        'construction_a_base', 'operation_b_base', 'end_of_life_c_base',
+        'construction_a', 'operation_b', 'end_of_life_c',
+        'total_gwp_base', 'total_gwp',
+        'excluded'
+    ]
+
+    # Filter to available columns
+    available_cols = [col for col in export_cols if col in df.columns]
+
+    # Export to CSV
+    csv_string = df[available_cols].to_csv(index=False)
+
+    return csv_string
+
+
+# ==============================================================================
 # INSIGHT GENERATION
 # ==============================================================================
 
@@ -75,29 +109,16 @@ def generate_insights(df: pd.DataFrame, structure: Dict[str, Any],
             ratio = comparison['ratio']['total_gwp']
             diff = comparison['difference']['total_gwp']
 
-            if ratio < 90:
-                verdict = "betydelig reduksjon"
-                color = "green"
-            elif ratio < 100:
-                verdict = "moderat reduksjon"
-                color = "green"
-            elif ratio < 110:
-                verdict = "liten økning"
-                color = "yellow"
-            else:
-                verdict = "betydelig økning"
-                color = "red"
-
             insights['executive_summary'].append(
-                f"Scenario C viser en {verdict} i klimagassutslipp sammenlignet med Scenario A "
-                f"({ratio:.1f}%, {diff:+,.0f} kg CO2e)."
+                f"Scenario C har {ratio:.1f}% av klimagassutslippene til Scenario A "
+                f"(forskjell: {diff:+,.0f} kg CO2e)."
             )
 
             insights['key_findings'].append({
                 'title': 'Scenario C vs A Sammenligning',
                 'value': f"{ratio:.1f}%",
-                'description': f"Differanse: {diff:+,.0f} kg CO2e",
-                'color': color
+                'description': f"Forskjell: {diff:+,.0f} kg CO2e",
+                'color': 'blue'
             })
 
             # Phase analysis - detailed
@@ -120,12 +141,11 @@ def generate_insights(df: pd.DataFrame, structure: Dict[str, Any],
                 })
 
                 if phase_ratio and abs(100 - phase_ratio) > 10:
-                    change = "reduksjon" if phase_ratio < 100 else "økning"
                     insights['key_findings'].append({
-                        'title': f'{label}: {change.capitalize()}',
+                        'title': f'{label}: Forskjell',
                         'value': f"{phase_ratio:.1f}%",
                         'description': f"{phase_diff:+,.0f} kg CO2e",
-                        'color': 'green' if phase_ratio < 100 else 'red'
+                        'color': 'blue'
                     })
 
     # MMI distribution insights
@@ -170,17 +190,18 @@ def generate_insights(df: pd.DataFrame, structure: Dict[str, Any],
         comparison = compare_scenarios(structure, 'A', 'C')
         if comparison and comparison['ratio']['total_gwp'] > 110:
             insights['recommendations'].append(
-                "Scenario C har betydelig høyere klimagassutslipp enn Scenario A. Vurder alternative løsninger "
-                "for å redusere utslipp, spesielt i faser med størst økning."
+                "Scenario C har høyere klimagassutslipp enn Scenario A. Vurder alternative løsninger "
+                "for å redusere utslipp, spesielt i faser med størst forskjell."
             )
         elif comparison and comparison['ratio']['total_gwp'] < 90:
             insights['recommendations'].append(
-                "Scenario C viser god reduksjon i klimagassutslipp. Dokumenter og implementer "
-                "disse tiltakene for maksimal klimanytte."
+                "Scenario C har lavere klimagassutslipp enn Scenario A. Dokumenter tiltakene "
+                "som gir denne forskjellen."
             )
         elif comparison and 100 <= comparison['ratio']['total_gwp'] <= 110:
             insights['recommendations'].append(
-                "Scenario C er tilnærmet likt Scenario A. Vurder ytterligere tiltak for å oppnå reduksjoner."
+                "Scenario C og A har tilnærmet like klimagassutslipp. Vurder ytterligere tiltak "
+                "dersom utslippsreduksjon er et mål."
             )
 
     if completeness < 90:
@@ -334,23 +355,12 @@ def generate_excel_report(df: pd.DataFrame, structure: Dict[str, Any],
                     diff = comparison['difference'][key]
                     ratio = comparison['ratio'][key] if comparison['ratio'][key] else 0
 
-                    # Verdict
-                    if ratio < 90:
-                        verdict = "Stor reduksjon ✓"
-                    elif ratio < 100:
-                        verdict = "Reduksjon ✓"
-                    elif ratio < 110:
-                        verdict = "Liten økning ⚠"
-                    else:
-                        verdict = "Stor økning ✗"
-
                     comp_data.append({
                         'LCA-fase': label,
                         'Scenario A (kg CO2e)': base_val,
                         'Scenario C (kg CO2e)': comp_val,
-                        'Differanse (C-A)': diff,
-                        'Ratio (C/A) %': ratio,
-                        'Vurdering': verdict
+                        'Forskjell (C-A)': diff,
+                        'Ratio (C/A) %': ratio
                     })
 
                 comp_df = pd.DataFrame(comp_data)
@@ -363,16 +373,6 @@ def generate_excel_report(df: pd.DataFrame, structure: Dict[str, Any],
                     cell.font = Font(bold=True, color='FFFFFF')
                     cell.fill = PatternFill(start_color='1565C0', end_color='1565C0', fill_type='solid')
                     cell.alignment = Alignment(horizontal='center')
-
-                # Conditional formatting on ratio column (column 5)
-                for row_idx in range(3, len(comp_data) + 3):
-                    ratio_cell = ws_comp.cell(row_idx, 5)
-                    ratio_val = ratio_cell.value
-
-                    if ratio_val and ratio_val < 100:
-                        ratio_cell.fill = PatternFill(start_color='C8E6C9', end_color='C8E6C9', fill_type='solid')
-                    elif ratio_val:
-                        ratio_cell.fill = PatternFill(start_color='FFCDD2', end_color='FFCDD2', fill_type='solid')
 
                 # Auto-size columns
                 for col in ws_comp.columns:
@@ -787,6 +787,11 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
             ratio = comparison['ratio']['total_gwp']
             diff = comparison['difference']['total_gwp']
 
+            # Calculate completeness for the metric box
+            total_rows = len(df)
+            mapped_rows = len(df[~df['excluded'] & df['mapped_scenario'].notna()])
+            completeness = (mapped_rows / total_rows * 100) if total_rows > 0 else 0
+
             # Determine color based on ratio
             if ratio < 95:
                 color = 'green'
@@ -797,7 +802,7 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
 
             # Create 3 metric boxes side by side
             box1 = create_metric_box("C vs A Ratio", f"{ratio:.1f}%", color, width=5)
-            box2 = create_metric_box("Differanse", f"{diff:+,.0f} kg", color, width=5)
+            box2 = create_metric_box("Forskjell", f"{diff:+,.0f} kg", color, width=5)
             box3 = create_metric_box("Datakvalitet", f"{completeness:.0f}%", 'blue', width=5)
 
             boxes_table = Table([[box1, box2, box3]], colWidths=[5.2*cm, 5.2*cm, 5.2*cm])
@@ -808,24 +813,24 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
             elements.append(boxes_table)
             elements.append(Spacer(1, 0.6*cm))
 
-            # Add verdict paragraph
+            # Add summary paragraph
             if ratio < 100:
-                verdict = f"✓ Scenario C har {abs(100-ratio):.1f}% lavere klimagassutslipp enn Scenario A"
-                verdict_color = colors.HexColor('#4CAF50')
+                summary = f"Scenario C: {abs(100-ratio):.1f}% lavere klimagassutslipp enn Scenario A"
+            elif ratio > 100:
+                summary = f"Scenario C: {ratio-100:.1f}% høyere klimagassutslipp enn Scenario A"
             else:
-                verdict = f"✗ Scenario C har {ratio-100:.1f}% høyere klimagassutslipp enn Scenario A"
-                verdict_color = colors.HexColor('#F44336')
+                summary = f"Scenario C og A har tilnærmet like klimagassutslipp"
 
-            verdict_style = ParagraphStyle(
-                'Verdict',
+            summary_style = ParagraphStyle(
+                'Summary',
                 parent=body_style,
                 fontSize=12,
-                textColor=verdict_color,
+                textColor=colors.HexColor('#1565C0'),
                 alignment=TA_CENTER,
                 spaceAfter=12,
                 fontName='Helvetica-Bold'
             )
-            elements.append(Paragraph(verdict, verdict_style))
+            elements.append(Paragraph(summary, summary_style))
 
     elements.append(create_section_divider())
     elements.append(Spacer(1, 0.4*cm))
@@ -999,7 +1004,7 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
             comp_elements.append(Spacer(1, 0.3*cm))
 
             # Comparison table
-            comp_table_data = [['LCA-fase', 'Scenario A', 'Scenario C', 'Differanse', 'Ratio %', 'Vurdering']]
+            comp_table_data = [['LCA-fase', 'Scenario A', 'Scenario C', 'Forskjell (C-A)', 'Ratio %']]
             for key, label in [
                 ('total_gwp', 'Total GWP'),
                 ('construction_a', 'Konstruksjon (A)'),
@@ -1011,25 +1016,15 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
                 phase_diff = comparison['difference'][key]
                 phase_ratio = comparison['ratio'][key] if comparison['ratio'][key] else 0
 
-                if phase_ratio < 90:
-                    verdict = "Stor reduksjon ✓"
-                elif phase_ratio < 100:
-                    verdict = "Reduksjon ✓"
-                elif phase_ratio < 110:
-                    verdict = "Liten økning ⚠"
-                else:
-                    verdict = "Stor økning ✗"
-
                 comp_table_data.append([
                     label,
                     f"{base_val:,.0f}",
                     f"{comp_val:,.0f}",
                     f"{phase_diff:+,.0f}",
-                    f"{phase_ratio:.1f}%",
-                    verdict
+                    f"{phase_ratio:.1f}%"
                 ])
 
-            comp_table = Table(comp_table_data, colWidths=[3*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2*cm, 3.5*cm])
+            comp_table = Table(comp_table_data, colWidths=[3*cm, 2.5*cm, 2.5*cm, 3*cm, 2.5*cm])
             comp_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565C0')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -1053,7 +1048,7 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
                 img_diff = plotly_to_image(fig_diff, width=700, height=400)
 
                 if img_diff:
-                    comp_elements.append(Paragraph("Differanse (kg CO2e)", heading3_style))
+                    comp_elements.append(Paragraph("Forskjell (kg CO2e)", heading3_style))
                     comp_elements.append(Image(img_diff, width=14*cm, height=8*cm))
                     comp_elements.append(Spacer(1, 0.3*cm))
 

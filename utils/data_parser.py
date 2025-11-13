@@ -84,6 +84,11 @@ def load_excel_file(file_path_or_buffer) -> pd.DataFrame:
     for col in ['construction_a', 'operation_b', 'end_of_life_c']:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
+    # Store base (unweighted) phase values for reference
+    df['construction_a_base'] = df['construction_a']
+    df['operation_b_base'] = df['operation_b']
+    df['end_of_life_c_base'] = df['end_of_life_c']
+
     # Calculate total GWP (base value)
     df['total_gwp_base'] = df['construction_a'] + df['operation_b'] + df['end_of_life_c']
 
@@ -97,7 +102,12 @@ def load_excel_file(file_path_or_buffer) -> pd.DataFrame:
     # Ensure weighting is within valid range
     df['weighting'] = df['weighting'].clip(lower=0, upper=100)
 
-    # Calculate weighted GWP
+    # Apply weighting to phase values (so they're consistent with total_gwp)
+    df['construction_a'] = df['construction_a'] * (df['weighting'] / 100.0)
+    df['operation_b'] = df['operation_b'] * (df['weighting'] / 100.0)
+    df['end_of_life_c'] = df['end_of_life_c'] * (df['weighting'] / 100.0)
+
+    # Calculate weighted GWP (now equals sum of weighted phases)
     df['total_gwp'] = df['total_gwp_base'] * (df['weighting'] / 100.0)
 
     # Add row ID for tracking
