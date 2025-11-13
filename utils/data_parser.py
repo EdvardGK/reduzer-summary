@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 
 def load_excel_file(file_path_or_buffer) -> pd.DataFrame:
     """
-    Load Excel file from Reduzer export and normalize columns.
+    Load Excel file and normalize columns.
+
+    PARSING ONLY - loads ALL rows with zero filtering.
+    Mapping suggestions and exclusions are separate concerns.
 
     Args:
         file_path_or_buffer: Path to Excel file or file buffer (for Streamlit upload)
@@ -26,7 +29,9 @@ def load_excel_file(file_path_or_buffer) -> pd.DataFrame:
     Returns:
         DataFrame with normalized columns and auto-detection suggestions
     """
-    # Read Excel file
+    # Read Excel file - load EVERYTHING
+    # Note: pd.read_excel stops at first completely empty row by default
+    # If your Excel has gaps, this might drop trailing rows
     if isinstance(file_path_or_buffer, (str, Path)):
         df = pd.read_excel(file_path_or_buffer)
     else:
@@ -59,8 +64,7 @@ def load_excel_file(file_path_or_buffer) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Mangler obligatoriske kolonner: {missing}")
 
-    # Fill empty categories with placeholder instead of dropping
-    # This ensures all rows from Excel are preserved
+    # Fill empty categories with placeholder (PARSING - preserve all rows)
     empty_category_mask = df['category'].isna() | (df['category'].astype(str).str.strip() == '')
     empty_category_count = empty_category_mask.sum()
 
@@ -70,9 +74,10 @@ def load_excel_file(file_path_or_buffer) -> pd.DataFrame:
         for idx in df[empty_category_mask].index:
             df.at[idx, 'category'] = f"[Empty Row {idx + 1}]"
 
-    logger.info(f"After processing: {len(df)} rows retained")
+    logger.info(f"After parsing: {len(df)} rows (no rows dropped)")
 
-    # Auto-detect summary rows
+    # MAPPING SUGGESTIONS (can fail, that's OK)
+    # Auto-detect summary rows (just flag it, don't exclude)
     df['is_summary'] = df['category'].apply(is_summary_row)
 
     # Apply automatic detection as SUGGESTIONS
@@ -87,14 +92,8 @@ def load_excel_file(file_path_or_buffer) -> pd.DataFrame:
     df['mapped_discipline'] = df['suggested_discipline']
     df['mapped_mmi_code'] = df['suggested_mmi_code']
 
-    # Initialize excluded flag
-    df['excluded'] = df['is_summary']  # Auto-exclude summary rows
-
-    # Auto-exclude outdated and copy models
-    category_lower = df['category'].astype(str).str.lower()
-    df['excluded'] = df['excluded'] | category_lower.str.contains('utdatert', na=False)
-    df['excluded'] = df['excluded'] | category_lower.str.contains('copy', na=False)
-    df['excluded'] = df['excluded'] | category_lower.str.contains('kopi', na=False)
+    # Initialize excluded flag - DEFAULT TO FALSE (user decides)
+    df['excluded'] = False
 
     # Convert numeric columns to float
     for col in ['construction_a', 'operation_b', 'end_of_life_c']:

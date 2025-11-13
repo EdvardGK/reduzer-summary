@@ -58,7 +58,15 @@ if excel_file:
     try:
         df = load_excel_file(excel_file)
         st.session_state['df'] = df
-        st.success(f"✓ Loaded {len(df)} rows")
+
+        # Detailed load report
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("✓ Loaded Rows", len(df))
+        with col2:
+            st.metric("Active", (~df['excluded']).sum())
+        with col3:
+            st.metric("Excluded", df['excluded'].sum())
 
         # Check for empty category placeholders
         empty_rows = df[df['category'].astype(str).str.startswith('[Empty Row')].shape[0]
@@ -68,6 +76,13 @@ if excel_file:
                 f"These have been filled with placeholders like '[Empty Row 1]'. "
                 f"You can manually map them below."
             )
+
+        # Debug: Show all categories loaded
+        with st.expander("🔍 Debug: Show all loaded categories"):
+            st.caption("All category values from your Excel file (in load order)")
+            debug_df = df[['category', 'mapped_scenario', 'mapped_discipline', 'mapped_mmi_code', 'excluded', 'total_gwp']].copy()
+            debug_df.index = range(1, len(debug_df) + 1)  # 1-based index for easier matching with Excel
+            st.dataframe(debug_df, use_container_width=True)
 
     except Exception as e:
         st.error(f"Error loading file: {e}")
