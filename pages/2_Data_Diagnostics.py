@@ -10,13 +10,15 @@ from utils.data_diagnostics import (
     diagnose_mmi_distribution,
     get_sample_categories_by_mmi,
     check_unmapped_mmi_codes,
-    get_detection_failures
+    get_detection_failures,
+    get_excluded_rows_with_reasons,
+    get_row_count_summary
 )
 
 st.set_page_config(page_title="Data Diagnostics", page_icon="🔍", layout="wide")
 
 st.title("🔍 Data Diagnostics")
-st.caption("Debug MMI detection and mapping issues")
+st.caption("Debug data loading, detection and mapping issues")
 
 # Check if data exists
 if 'df' not in st.session_state or st.session_state['df'] is None:
@@ -24,6 +26,47 @@ if 'df' not in st.session_state or st.session_state['df'] is None:
     st.stop()
 
 df = st.session_state['df']
+
+# ==============================================================================
+# ROW COUNT SUMMARY
+# ==============================================================================
+st.markdown("## 📈 Row Count Summary")
+st.caption("Shows how many rows from your Excel file made it through each stage")
+
+row_summary = get_row_count_summary(df)
+st.dataframe(row_summary, use_container_width=True, hide_index=True)
+
+total_rows = len(df)
+excluded_rows = int(df['excluded'].sum())
+active_rows = total_rows - excluded_rows
+
+if excluded_rows > 0:
+    st.warning(f"⚠️ **{excluded_rows} of {total_rows} rows were automatically excluded!** See details below.")
+else:
+    st.success(f"✅ All {total_rows} rows from your Excel file are active (not excluded)")
+
+# ==============================================================================
+# EXCLUDED ROWS
+# ==============================================================================
+if excluded_rows > 0:
+    st.markdown("---")
+    st.markdown("## 🚫 Auto-Excluded Rows")
+    st.caption("These rows were automatically filtered out and won't appear in analysis")
+
+    excluded_df = get_excluded_rows_with_reasons(df)
+    st.dataframe(excluded_df, use_container_width=True, hide_index=True)
+
+    st.markdown("### Why were these excluded?")
+    st.markdown("""
+    The system auto-excludes rows that match these patterns:
+    - **Summary rows**: Category contains "RAMBELL", "S8 -", "Total", "Sum", "Totalt"
+    - **Outdated items**: Category contains "utdatert"
+    - **Copies**: Category contains "copy" or "kopi"
+
+    **To include these rows**: Go to the main page, filter "Excluded Only", and uncheck the "Ekskludert" checkbox for rows you want to include.
+    """)
+
+st.markdown("---")
 
 # ==============================================================================
 # MMI DISTRIBUTION OVERVIEW

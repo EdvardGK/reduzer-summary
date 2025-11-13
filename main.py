@@ -60,6 +60,15 @@ if excel_file:
         st.session_state['df'] = df
         st.success(f"✓ Loaded {len(df)} rows")
 
+        # Check for empty category placeholders
+        empty_rows = df[df['category'].astype(str).str.startswith('[Empty Row')].shape[0]
+        if empty_rows > 0:
+            st.warning(
+                f"⚠️ Found {empty_rows} rows with empty category names. "
+                f"These have been filled with placeholders like '[Empty Row 1]'. "
+                f"You can manually map them below."
+            )
+
     except Exception as e:
         st.error(f"Error loading file: {e}")
         logger.error(f"File load error: {e}", exc_info=True)

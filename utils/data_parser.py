@@ -5,12 +5,15 @@ Excel file parsing and mapping-based data aggregation
 
 import pandas as pd
 import numpy as np
+import logging
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 import io
 
 from .detector import detect_all, is_summary_row
 from .predefined_structure import validate_combination
+
+logger = logging.getLogger(__name__)
 
 
 def load_excel_file(file_path_or_buffer) -> pd.DataFrame:
@@ -29,6 +32,10 @@ def load_excel_file(file_path_or_buffer) -> pd.DataFrame:
     else:
         # Handle Streamlit uploaded file
         df = pd.read_excel(file_path_or_buffer)
+
+    # Log initial row count
+    initial_row_count = len(df)
+    logger.info(f"Excel file loaded: {initial_row_count} rows")
 
     # Expected columns: category, Construction (A), Operation (B), End-of-life (C)
     # Rename for easier handling
@@ -52,9 +59,18 @@ def load_excel_file(file_path_or_buffer) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Mangler obligatoriske kolonner: {missing}")
 
-    # Remove rows where category is NaN or empty
-    df = df[df['category'].notna()].copy()
-    df = df[df['category'].astype(str).str.strip() != ''].copy()
+    # Fill empty categories with placeholder instead of dropping
+    # This ensures all rows from Excel are preserved
+    empty_category_mask = df['category'].isna() | (df['category'].astype(str).str.strip() == '')
+    empty_category_count = empty_category_mask.sum()
+
+    if empty_category_count > 0:
+        logger.warning(f"Found {empty_category_count} rows with empty category - filling with placeholder")
+        # Create unique placeholders for empty categories
+        for idx in df[empty_category_mask].index:
+            df.at[idx, 'category'] = f"[Empty Row {idx + 1}]"
+
+    logger.info(f"After processing: {len(df)} rows retained")
 
     # Auto-detect summary rows
     df['is_summary'] = df['category'].apply(is_summary_row)

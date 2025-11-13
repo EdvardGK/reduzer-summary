@@ -121,3 +121,73 @@ def get_detection_failures(df: pd.DataFrame) -> pd.DataFrame:
     ][['category', 'mapped_scenario', 'mapped_discipline', 'mapped_mmi_code', 'total_gwp']]
 
     return failures.head(20)  # Limit to first 20 for display
+
+
+def get_excluded_rows_with_reasons(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Find all excluded rows and explain why they were excluded.
+
+    Args:
+        df: Full dataframe
+
+    Returns:
+        DataFrame showing excluded rows with reasons
+    """
+    excluded = df[df['excluded']].copy()
+
+    if excluded.empty:
+        return pd.DataFrame()
+
+    # Determine exclusion reason
+    reasons = []
+    for idx, row in excluded.iterrows():
+        category = str(row['category']).lower()
+        reason_parts = []
+
+        if row.get('is_summary', False):
+            reason_parts.append("Summary row")
+        if 'utdatert' in category:
+            reason_parts.append("Contains 'utdatert'")
+        if 'copy' in category or 'kopi' in category:
+            reason_parts.append("Contains 'copy/kopi'")
+
+        reasons.append(", ".join(reason_parts) if reason_parts else "Unknown")
+
+    excluded['Exclusion Reason'] = reasons
+
+    return excluded[['category', 'Exclusion Reason', 'suggested_scenario', 'suggested_discipline', 'suggested_mmi_code', 'total_gwp']]
+
+
+def get_row_count_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Get a summary of row counts at each stage of processing.
+
+    Args:
+        df: Full dataframe
+
+    Returns:
+        DataFrame with row count breakdown
+    """
+    total = len(df)
+    excluded = df['excluded'].sum()
+    active = total - excluded
+
+    mapped_scenario = (df['mapped_scenario'].notna() & ~df['excluded']).sum()
+    mapped_discipline = (df['mapped_discipline'].notna() & ~df['excluded']).sum()
+    mapped_mmi = (df['mapped_mmi_code'].notna() & ~df['excluded']).sum()
+    fully_mapped = ((df['mapped_scenario'].notna()) &
+                    (df['mapped_discipline'].notna()) &
+                    (df['mapped_mmi_code'].notna()) &
+                    (~df['excluded'])).sum()
+
+    summary = [
+        {'Stage': 'Total rows in Excel', 'Count': total},
+        {'Stage': 'Auto-excluded', 'Count': int(excluded)},
+        {'Stage': 'Active (not excluded)', 'Count': int(active)},
+        {'Stage': 'With Scenario mapped', 'Count': int(mapped_scenario)},
+        {'Stage': 'With Discipline mapped', 'Count': int(mapped_discipline)},
+        {'Stage': 'With MMI mapped', 'Count': int(mapped_mmi)},
+        {'Stage': 'Fully mapped (all 3)', 'Count': int(fully_mapped)}
+    ]
+
+    return pd.DataFrame(summary)
