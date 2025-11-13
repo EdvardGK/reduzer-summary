@@ -203,33 +203,35 @@ def create_comparison_chart(comparison: Dict[str, Any], chart_type: str = 'diffe
         values = [comparison['difference'][key] for key in keys]
         title = f"Differanse: Scenario {compare} - Scenario {base}"
         yaxis_title = 'Differanse (kg CO2e)'
-        colors = ['green' if v < 0 else 'red' for v in values]
+        colors = ['#4CAF50' if v < 0 else '#F44336' for v in values]
     else:  # ratio
         values = [comparison['ratio'][key] if comparison['ratio'][key] is not None else 0 for key in keys]
         title = f"Ratio: Scenario {compare} / Scenario {base}"
         yaxis_title = 'Ratio (%)'
-        colors = ['green' if v < 100 else 'red' for v in values]
+        colors = ['#4CAF50' if v < 100 else '#F44336' for v in values]
 
     fig = go.Figure(go.Bar(
         x=categories,
         y=values,
         marker_color=colors,
         text=[f"{v:,.0f}" if chart_type == 'difference' else f"{v:.1f}%" for v in values],
-        textposition='auto'
+        textposition='outside',
+        textfont=dict(size=11)
     ))
 
     fig.update_layout(
-        title=title,
+        title=dict(text=title, font=dict(size=14)),
         xaxis_title='LCA-fase',
         yaxis_title=yaxis_title,
-        height=500,
-        showlegend=False
+        height=350,
+        showlegend=False,
+        margin=dict(l=50, r=20, t=40, b=60)
     )
 
     if chart_type == 'ratio':
         # Add reference line at 100%
         fig.add_hline(y=100, line_dash="dash", line_color="gray",
-                      annotation_text="Baseline (100%)")
+                      annotation_text="Baseline (100%)", annotation_font_size=10)
 
     return fig
 
@@ -546,3 +548,326 @@ def get_mmi_summary_stats(structure: Dict[str, Any], scenario: str) -> pd.DataFr
         })
 
     return pd.DataFrame(stats).sort_values('GWP (kg CO2e)', ascending=False)
+
+
+def create_discipline_contribution_pie(structure: Dict[str, Any], scenario: str) -> go.Figure:
+    """
+    Create pie chart showing discipline contribution within a scenario.
+
+    Args:
+        structure: Hierarchical structure
+        scenario: Scenario to visualize
+
+    Returns:
+        Plotly figure
+    """
+    if scenario not in structure:
+        return go.Figure()
+
+    labels = []
+    values = []
+
+    for discipline, data in structure[scenario]['disciplines'].items():
+        labels.append(discipline)
+        values.append(data['total']['total_gwp'])
+
+    if not values:
+        return go.Figure()
+
+    # Calculate percentages
+    total = sum(values)
+    percentages = [(v/total)*100 for v in values]
+
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=values,
+        textinfo='label+percent',
+        textposition='auto',
+        hovertemplate='<b>%{label}</b><br>GWP: %{value:,.0f} kg CO2e<br>Andel: %{percent}<extra></extra>'
+    )])
+
+    fig.update_layout(
+        title=f"Disiplinfordeling Scenario {scenario}",
+        height=400,
+        showlegend=True
+    )
+
+    return fig
+
+
+def create_discipline_cross_scenario_chart(structure: Dict[str, Any], discipline: str) -> go.Figure:
+    """
+    Create stacked bar chart showing a specific discipline across all scenarios.
+
+    Args:
+        structure: Hierarchical structure
+        discipline: Discipline to visualize
+
+    Returns:
+        Plotly figure
+    """
+    scenarios = []
+    construction = []
+    operation = []
+    end_of_life = []
+
+    for scenario in sorted(structure.keys()):
+        if discipline in structure[scenario]['disciplines']:
+            scenarios.append(scenario)
+            disc_data = structure[scenario]['disciplines'][discipline]['total']
+            construction.append(disc_data['construction_a'])
+            operation.append(disc_data['operation_b'])
+            end_of_life.append(disc_data['end_of_life_c'])
+
+    if not scenarios:
+        return go.Figure()
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        name=PHASE_LABELS['construction_a'],
+        x=scenarios,
+        y=construction,
+        marker_color=PHASE_COLORS['construction_a']
+    ))
+
+    fig.add_trace(go.Bar(
+        name=PHASE_LABELS['operation_b'],
+        x=scenarios,
+        y=operation,
+        marker_color=PHASE_COLORS['operation_b']
+    ))
+
+    fig.add_trace(go.Bar(
+        name=PHASE_LABELS['end_of_life_c'],
+        x=scenarios,
+        y=end_of_life,
+        marker_color=PHASE_COLORS['end_of_life_c']
+    ))
+
+    fig.update_layout(
+        title=f"{discipline} på tvers av scenarioer",
+        barmode='stack',
+        xaxis_title='Scenario',
+        yaxis_title='GWP (kg CO2e)',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        height=500
+    )
+
+    return fig
+
+
+def create_scenario_stacked_bar(structure: Dict[str, Any]) -> go.Figure:
+    """
+    Create stacked bar chart showing all scenarios with LCA phases.
+
+    Args:
+        structure: Hierarchical structure from aggregate_by_mapping
+
+    Returns:
+        Plotly figure
+    """
+    scenarios = []
+    construction = []
+    operation = []
+    end_of_life = []
+
+    for scenario in sorted(structure.keys()):
+        scenarios.append(scenario)
+        construction.append(structure[scenario]['total']['construction_a'])
+        operation.append(structure[scenario]['total']['operation_b'])
+        end_of_life.append(structure[scenario]['total']['end_of_life_c'])
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        name=PHASE_LABELS['construction_a'],
+        x=scenarios,
+        y=construction,
+        marker_color=PHASE_COLORS['construction_a']
+    ))
+
+    fig.add_trace(go.Bar(
+        name=PHASE_LABELS['operation_b'],
+        x=scenarios,
+        y=operation,
+        marker_color=PHASE_COLORS['operation_b']
+    ))
+
+    fig.add_trace(go.Bar(
+        name=PHASE_LABELS['end_of_life_c'],
+        x=scenarios,
+        y=end_of_life,
+        marker_color=PHASE_COLORS['end_of_life_c']
+    ))
+
+    fig.update_layout(
+        title=dict(text="Scenariosammenligning", font=dict(size=14)),
+        barmode='stack',
+        xaxis_title='Scenario',
+        yaxis_title='GWP (kg CO2e)',
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.15,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=10)
+        ),
+        height=400,
+        margin=dict(l=50, r=20, t=40, b=80)
+    )
+
+    return fig
+
+
+def create_scenario_comparison_chart(structure: Dict[str, Any], base_scenario: str, compare_scenario: str) -> go.Figure:
+    """
+    Create comparison bar chart for two scenarios.
+
+    Args:
+        structure: Hierarchical structure
+        base_scenario: Base scenario (e.g., "A")
+        compare_scenario: Scenario to compare (e.g., "C")
+
+    Returns:
+        Plotly figure
+    """
+    from .data_parser import compare_scenarios
+    comparison = compare_scenarios(structure, base_scenario, compare_scenario)
+    if not comparison:
+        return go.Figure()
+    return create_comparison_chart(comparison, chart_type='difference')
+
+
+def create_discipline_comparison_bar(comparison: Dict[str, Any], chart_type: str = 'difference') -> go.Figure:
+    """
+    Create comparison bar chart for a specific discipline across scenarios.
+
+    Args:
+        comparison: Comparison data from compare_disciplines_across_scenarios
+        chart_type: 'difference' or 'ratio'
+
+    Returns:
+        Plotly figure
+    """
+    if not comparison:
+        return go.Figure()
+
+    discipline = comparison['discipline']
+    base = comparison['base_scenario']
+    compare = comparison['compare_scenario']
+
+    categories = ['Konstruksjon (A)', 'Drift (B)', 'Avslutning (C)', 'Total GWP']
+    keys = ['construction_a', 'operation_b', 'end_of_life_c', 'total_gwp']
+
+    if chart_type == 'difference':
+        values = [comparison['difference'][key] for key in keys]
+        title = f"{discipline}: Scenario {compare} - Scenario {base}"
+        yaxis_title = 'Differanse (kg CO2e)'
+        colors = ['green' if v < 0 else 'red' for v in values]
+    else:  # ratio
+        values = [comparison['ratio'][key] if comparison['ratio'][key] is not None else 0 for key in keys]
+        title = f"{discipline}: Scenario {compare} / Scenario {base}"
+        yaxis_title = 'Ratio (%)'
+        colors = ['green' if v < 100 else 'red' for v in values]
+
+    fig = go.Figure(go.Bar(
+        x=categories,
+        y=values,
+        marker_color=colors,
+        text=[f"{v:,.0f}" if chart_type == 'difference' else f"{v:.1f}%" for v in values],
+        textposition='auto'
+    ))
+
+    fig.update_layout(
+        title=title,
+        xaxis_title='LCA-fase',
+        yaxis_title=yaxis_title,
+        height=500,
+        showlegend=False
+    )
+
+    if chart_type == 'ratio':
+        # Add reference line at 100%
+        fig.add_hline(y=100, line_dash="dash", line_color="gray",
+                      annotation_text="Baseline (100%)")
+
+    return fig
+
+
+def create_all_disciplines_comparison(structure: Dict[str, Any], base_scenario: str, compare_scenario: str) -> go.Figure:
+    """
+    Create grouped bar chart comparing all disciplines between two scenarios.
+
+    Args:
+        structure: Hierarchical structure
+        base_scenario: Base scenario
+        compare_scenario: Compare scenario
+
+    Returns:
+        Plotly figure
+    """
+    from .data_parser import get_all_disciplines_comparison
+    df = get_all_disciplines_comparison(structure, base_scenario, compare_scenario)
+    if df.empty:
+        return go.Figure()
+
+    return create_all_disciplines_comparison_chart(df, base_scenario, compare_scenario)
+
+
+def create_all_disciplines_comparison_chart(df: pd.DataFrame, base_scenario: str, compare_scenario: str) -> go.Figure:
+    """
+    Create grouped bar chart comparing all disciplines between two scenarios.
+
+    Args:
+        df: DataFrame from get_all_disciplines_comparison
+        base_scenario: Base scenario
+        compare_scenario: Compare scenario
+
+    Returns:
+        Plotly figure
+    """
+    if df.empty:
+        return go.Figure()
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        name=f'Scenario {base_scenario}',
+        x=df['Disiplin'],
+        y=df[f'Scenario {base_scenario}'],
+        marker_color='lightblue'
+    ))
+
+    fig.add_trace(go.Bar(
+        name=f'Scenario {compare_scenario}',
+        x=df['Disiplin'],
+        y=df[f'Scenario {compare_scenario}'],
+        marker_color='darkblue'
+    ))
+
+    fig.update_layout(
+        title=dict(text=f"Disiplinsammenligning: Scenario {compare_scenario} vs {base_scenario}", font=dict(size=14)),
+        barmode='group',
+        xaxis_title='Disiplin',
+        yaxis_title='GWP (kg CO2e)',
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.15,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=10)
+        ),
+        height=400,
+        margin=dict(l=50, r=20, t=40, b=80)
+    )
+
+    return fig

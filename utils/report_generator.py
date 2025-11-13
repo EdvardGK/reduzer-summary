@@ -53,9 +53,14 @@ def generate_insights(df: pd.DataFrame, structure: Dict[str, Any],
     excluded_rows = int(df['excluded'].sum())
     completeness = (mapped_rows / total_rows * 100) if total_rows > 0 else 0
 
+    # Weighting stats
+    weighted_rows = len(df[(~df['excluded']) & (df['weighting'] < 100)])
+    avg_weighting = df[~df['excluded']]['weighting'].mean()
+
     insights['executive_summary'].append(
         f"Analysen dekker {total_rows} datapunkter, hvor {mapped_rows} ({completeness:.0f}%) "
-        f"er kartlagt og {excluded_rows} er ekskludert."
+        f"er kartlagt og {excluded_rows} er ekskludert. "
+        f"Gjennomsnittlig vekting: {avg_weighting:.0f}% ({weighted_rows} rader har redusert vekt)."
     )
 
     # Scenario comparison
@@ -512,24 +517,33 @@ def generate_excel_report(df: pd.DataFrame, structure: Dict[str, Any],
             ws_disc.add_chart(chart_disc, f"A{len(disc_df)+7}")
 
         # ==============================================================================
-        # SHEET 6: RAW DATA
+        # SHEET 6: RAW DATA WITH WEIGHTING
         # ==============================================================================
         active_df = df[~df['excluded'] & df['mapped_scenario'].notna()].copy()
         export_cols = [
-            'category', 'mapped_scenario', 'mapped_discipline', 'mapped_mmi_code',
-            'construction_a', 'operation_b', 'end_of_life_c', 'total_gwp'
+            'category', 'mapped_scenario', 'mapped_discipline', 'mapped_mmi_code', 'weighting',
+            'construction_a', 'operation_b', 'end_of_life_c', 'total_gwp_base', 'total_gwp'
         ]
         active_export = active_df[export_cols].rename(columns={
             'category': 'Kategori',
             'mapped_scenario': 'Scenario',
             'mapped_discipline': 'Disiplin',
             'mapped_mmi_code': 'MMI',
+            'weighting': 'Vekting %',
             'construction_a': 'Konstruksjon (A)',
             'operation_b': 'Drift (B)',
             'end_of_life_c': 'Avslutning (C)',
-            'total_gwp': 'Total GWP'
+            'total_gwp_base': 'GWP basis',
+            'total_gwp': 'GWP vektet'
         })
         active_export.to_excel(writer, sheet_name='📋 Kartlagt data', index=False)
+
+        # Format weighting column
+        ws_data = writer.sheets['📋 Kartlagt data']
+        for col in range(1, len(active_export.columns) + 1):
+            cell = ws_data.cell(1, col)
+            cell.font = Font(bold=True, color='FFFFFF')
+            cell.fill = PatternFill(start_color='1565C0', end_color='1565C0', fill_type='solid')
 
     excel_output.seek(0)
     return excel_output
@@ -573,7 +587,7 @@ def plotly_to_image(fig: go.Figure, width: int = 800, height: int = 500) -> Opti
     Uses kaleido if available, otherwise returns None.
     """
     try:
-        img_bytes = fig.to_image(format="png", width=width, height=height, engine="kaleido")
+        img_bytes = fig.to_image(format="png", width=width, height=height, scale=2, engine="kaleido")
         return io.BytesIO(img_bytes)
     except:
         # If kaleido not available, return None
@@ -636,9 +650,11 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
     body_style = ParagraphStyle(
         'Body',
         parent=styles['Normal'],
-        fontSize=10,
+        fontSize=9,
         alignment=TA_JUSTIFY,
-        spaceAfter=8
+        spaceAfter=6,
+        leading=12,
+        wordWrap='CJK'
     )
 
     # Generate insights
@@ -647,37 +663,43 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
     # ==============================================================================
     # TITLE PAGE
     # ==============================================================================
-    elements.append(Spacer(1, 3*cm))
+    elements.append(Spacer(1, 2*cm))
     elements.append(Paragraph("LCA SCENARIO MAPPING", title_style))
     elements.append(Paragraph("Klimagassanalyse og scenariosammenligning", subtitle_style))
     elements.append(Paragraph(
         f"Generert: {datetime.now().strftime('%d.%m.%Y kl. %H:%M')}",
         subtitle_style
     ))
-    elements.append(Spacer(1, 1.5*cm))
+    elements.append(Spacer(1, 1*cm))
 
     # Key metrics box
+    weighted_rows = len(df[(~df['excluded']) & (df['weighting'] < 100)])
+    avg_weighting = df[~df['excluded']]['weighting'].mean()
+
     metrics_data = [
         ['NØKKELTALL', ''],
         ['Total rader', str(len(df))],
         ['Kartlagte rader', str(len(df[~df['excluded'] & df['mapped_scenario'].notna()]))],
         ['Ekskluderte rader', str(int(df['excluded'].sum()))],
-        ['Antall scenarioer', str(len(structure))]
+        ['Antall scenarioer', str(len(structure))],
+        ['Gj.snitt vekting', f"{avg_weighting:.0f}%"],
+        ['Rader m/redusert vekt', str(weighted_rows)]
     ]
 
-    metrics_table = Table(metrics_data, colWidths=[10*cm, 5*cm])
+    metrics_table = Table(metrics_data, colWidths=[9*cm, 4*cm])
     metrics_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565C0')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('BACKGROUND', (0, 1), (0, -1), colors.HexColor('#E3F2FD')),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
-        ('TOPPADDING', (0, 0), (-1, -1), 10),
-        ('GRID', (0, 0), (-1, -1), 1, colors.grey)
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F5F5F5')])
     ]))
     elements.append(metrics_table)
 
@@ -706,17 +728,19 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
                 finding['description']
             ])
 
-        findings_table = Table(findings_data, colWidths=[5*cm, 4*cm, 7*cm])
+        findings_table = Table(findings_data, colWidths=[4.5*cm, 3.5*cm, 7*cm])
         findings_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565C0')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F5F5F5')]),
+            ('WORDWRAP', (0, 0), (-1, -1), True)
         ]))
         findings_elements.append(findings_table)
 
@@ -753,17 +777,18 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
             f"{row['Total GWP']:,.0f}"
         ])
 
-    scenario_table = Table(scenario_table_data, colWidths=[2*cm, 3.5*cm, 3.5*cm, 3.5*cm, 3.5*cm])
+    scenario_table = Table(scenario_table_data, colWidths=[1.5*cm, 3*cm, 3*cm, 3*cm, 3.5*cm])
     scenario_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565C0')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+        ('ALIGN', (0, 0), (0, -1), 'CENTER'),
         ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F5F5F5')])
     ]))
     scenario_elements.append(scenario_table)
     scenario_elements.append(Spacer(1, 0.3*cm))
@@ -778,13 +803,13 @@ def generate_pdf_report(df: pd.DataFrame, structure: Dict[str, Any],
         chart_df['end_of_life_c'] = chart_df['Avslutning (C)']
 
         fig = create_stacked_bar_chart(chart_df, 'Scenario', "GWP per Scenario")
-        img_bytes = plotly_to_image(fig, width=700, height=450)
+        img_bytes = plotly_to_image(fig, width=650, height=380)
 
         if img_bytes:
-            img = Image(img_bytes, width=16*cm, height=10*cm)
+            img = Image(img_bytes, width=14*cm, height=8*cm)
             scenario_elements.append(img)
         else:
-            scenario_elements.append(Paragraph("(Diagram ikke tilgjengelig - installer 'kaleido')", body_style))
+            scenario_elements.append(Paragraph("(Diagram ikke tilgjengelig)", body_style))
     except Exception as e:
         scenario_elements.append(Paragraph(f"(Diagram ikke tilgjengelig)", body_style))
 

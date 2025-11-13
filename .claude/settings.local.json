@@ -2,7 +2,22 @@
   "permissions": {
     "allow": [
       "Bash(python3:*)",
-      "Read(//mnt/host/c/Users/edkjo/theSpruceForgeDevelopment/projects/active/**)"
+      "Read(//mnt/host/c/Users/edkjo/theSpruceForgeDevelopment/projects/active/**)",
+      "Bash(awk:*)",
+      "Bash(tree:*)",
+      "Bash(cat:*)",
+      "WebSearch",
+      "Bash(python:*)",
+      "Bash(for file in pages/*.py)",
+      "Bash(do python3 -m py_compile \"$file\")",
+      "Bash(echo:*)",
+      "Bash(done)",
+      "Bash(find:*)",
+      "Bash(/home/edkjo/miniconda3/envs/spruceforge/bin/python -c \"from ns3451_mapper import process_ifc_file; print(''✓ Module imports successfully!'')\")",
+      "Bash(/home/edkjo/miniconda3/envs/spruceforge/bin/python:*)",
+      "Bash(chmod:*)",
+      "Bash(ns3451-mapper:*)",
+      "Bash(pip install:*)"
     ],
     "deny": [],
     "ask": []

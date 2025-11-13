@@ -74,12 +74,24 @@ def load_excel_file(file_path_or_buffer) -> pd.DataFrame:
     # Initialize excluded flag
     df['excluded'] = df['is_summary']  # Auto-exclude summary rows
 
+    # Auto-exclude outdated and copy models
+    category_lower = df['category'].astype(str).str.lower()
+    df['excluded'] = df['excluded'] | category_lower.str.contains('utdatert', na=False)
+    df['excluded'] = df['excluded'] | category_lower.str.contains('copy', na=False)
+    df['excluded'] = df['excluded'] | category_lower.str.contains('kopi', na=False)
+
+    # Initialize weighting column (default 100% - full weight)
+    df['weighting'] = 100.0
+
     # Convert numeric columns to float
     for col in ['construction_a', 'operation_b', 'end_of_life_c']:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-    # Calculate total GWP
-    df['total_gwp'] = df['construction_a'] + df['operation_b'] + df['end_of_life_c']
+    # Calculate total GWP (base value)
+    df['total_gwp_base'] = df['construction_a'] + df['operation_b'] + df['end_of_life_c']
+
+    # Calculate weighted GWP
+    df['total_gwp'] = df['total_gwp_base'] * (df['weighting'] / 100.0)
 
     # Add row ID for tracking
     df['row_id'] = range(len(df))
@@ -332,3 +344,132 @@ def get_mapping_statistics(df: pd.DataFrame) -> Dict[str, int]:
         'partially_mapped': len(partially_mapped),
         'mapping_completeness': (len(fully_mapped) / active * 100) if active > 0 else 0
     }
+
+
+def get_discipline_contribution(structure: Dict[str, Any], scenario: str) -> pd.DataFrame:
+    """
+    Get percentage contribution of each discipline within a scenario.
+
+    Args:
+        structure: Hierarchical structure
+        scenario: Scenario to analyze
+
+    Returns:
+        DataFrame with discipline contributions
+    """
+    if scenario not in structure:
+        return pd.DataFrame()
+
+    scenario_total = structure[scenario]['total']['total_gwp']
+
+    contributions = []
+    for discipline, data in structure[scenario]['disciplines'].items():
+        disc_total = data['total']['total_gwp']
+        percentage = (disc_total / scenario_total * 100) if scenario_total > 0 else 0
+
+        contributions.append({
+            'Disiplin': discipline,
+            'Total GWP': disc_total,
+            'Andel (%)': percentage,
+            'Konstruksjon (A)': data['total']['construction_a'],
+            'Drift (B)': data['total']['operation_b'],
+            'Avslutning (C)': data['total']['end_of_life_c'],
+            'Antall rader': data['total']['count']
+        })
+
+    df = pd.DataFrame(contributions)
+    return df.sort_values('Total GWP', ascending=False)
+
+
+def compare_disciplines_across_scenarios(structure: Dict[str, Any],
+                                         discipline: str,
+                                         base_scenario: str,
+                                         compare_scenario: str) -> Dict[str, Any]:
+    """
+    Compare a specific discipline across two scenarios.
+
+    Args:
+        structure: Hierarchical structure
+        discipline: Discipline to compare (e.g., "RIV")
+        base_scenario: Base scenario (e.g., "A")
+        compare_scenario: Scenario to compare (e.g., "C")
+
+    Returns:
+        Dictionary with comparison metrics
+    """
+    if (base_scenario not in structure or
+        compare_scenario not in structure or
+        discipline not in structure[base_scenario]['disciplines'] or
+        discipline not in structure[compare_scenario]['disciplines']):
+        return {}
+
+    base = structure[base_scenario]['disciplines'][discipline]['total']
+    compare = structure[compare_scenario]['disciplines'][discipline]['total']
+
+    comparison = {
+        'discipline': discipline,
+        'base_scenario': base_scenario,
+        'compare_scenario': compare_scenario,
+        'difference': {},
+        'ratio': {}
+    }
+
+    for key in ['construction_a', 'operation_b', 'end_of_life_c', 'total_gwp']:
+        # Difference
+        comparison['difference'][key] = compare[key] - base[key]
+
+        # Ratio (avoid division by zero)
+        if base[key] != 0:
+            comparison['ratio'][key] = (compare[key] / base[key]) * 100
+        else:
+            comparison['ratio'][key] = None
+
+    return comparison
+
+
+def get_all_disciplines_comparison(structure: Dict[str, Any],
+                                   base_scenario: str,
+                                   compare_scenario: str) -> pd.DataFrame:
+    """
+    Compare all disciplines between two scenarios.
+
+    Args:
+        structure: Hierarchical structure
+        base_scenario: Base scenario (e.g., "A")
+        compare_scenario: Scenario to compare (e.g., "C")
+
+    Returns:
+        DataFrame with comparison for all disciplines
+    """
+    if base_scenario not in structure or compare_scenario not in structure:
+        return pd.DataFrame()
+
+    comparisons = []
+
+    # Get all disciplines that exist in either scenario
+    all_disciplines = set()
+    all_disciplines.update(structure[base_scenario]['disciplines'].keys())
+    all_disciplines.update(structure[compare_scenario]['disciplines'].keys())
+
+    for discipline in sorted(all_disciplines):
+        base_total = 0
+        compare_total = 0
+
+        if discipline in structure[base_scenario]['disciplines']:
+            base_total = structure[base_scenario]['disciplines'][discipline]['total']['total_gwp']
+
+        if discipline in structure[compare_scenario]['disciplines']:
+            compare_total = structure[compare_scenario]['disciplines'][discipline]['total']['total_gwp']
+
+        difference = compare_total - base_total
+        ratio = (compare_total / base_total * 100) if base_total > 0 else None
+
+        comparisons.append({
+            'Disiplin': discipline,
+            f'Scenario {base_scenario}': base_total,
+            f'Scenario {compare_scenario}': compare_total,
+            'Differanse': difference,
+            'Ratio (%)': ratio
+        })
+
+    return pd.DataFrame(comparisons)
